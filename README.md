@@ -68,7 +68,7 @@ Dadurch ist der Code an nahezu jeder Mühle verwendbar, welche solch einen physi
 3. **Benötigte Bibliotheken installieren**
 4. -  Im Code den ESP in das eigene Wlan einwählen (SSID und Passwort anpassen)
 5. **Code hochladen**
-   - Lade den Quellcode aus `/src` in die Arduino IDE.
+   - Lade den Quellcode aus `Arduino Code` in die Arduino IDE.
    - Wähle den richtigen Port unter **Werkzeuge → Port**.
    - Upload starten
 

@@ -1,0 +1,267 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HX711.h>
+#include <Wire.h>
+#include <Stepper.h>
+
+
+// WLAN-Zugangsdaten
+const char* ssid = "ESP32-Access-Point";  
+const char* password = "123456789"; 
+
+
+
+// Webserver auf Port 80
+WebServer server(80);
+
+
+// HX711 Pins
+#define DT_PIN D2
+#define SCK_PIN D3
+
+// Steuer-Pins
+#define LED_PIN D7
+#define npnPin D8
+#define POT_PIN A0
+#define START_BUTTON_PIN D6
+#define TARE_BUTTON_PIN D5
+
+const int stepsPerRevolution = 2048;
+#define IN1 D9
+#define IN2 D10
+#define IN3 D11
+#define IN4 D12
+
+Stepper myStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
+
+
+
+// HX711 Objekt
+HX711 scale;
+
+// Variablen
+float zielGewicht = 18.0;
+float aktuellesGewicht = 0.0;
+float offset = 0.5;
+bool mahlungAktiv = false;
+bool manualMode = false;  // Manuell gesetztes Zielgewicht
+float lastPotValue = -1;  // Letzter Potentiometerwert
+
+// Mahlgrad
+int mahlgrad = 0;  // 0 = mittel, negative Werte = feiner, positive Werte = grober
+const int schritteProStufe = 250; // 2048 Schritte für 90° nach Übersetzung, minus Spiel von 48 Schritten. 8 stufen, also 256 pro Stufe Minus Spiel von 6)
+
+void setup() {
+  Serial.begin(115200);
+
+ 
+  
+  // HX711 Initialisierung und Kalibrierung 
+  scale.begin(DT_PIN, SCK_PIN);
+  scale.set_scale(1902.2); 	//Kalibrierwert Anpassen mit Eichgewicht neuerWert = alterWert*(gemessenes Gewicht / soll-Gewicht)
+  scale.tare();  
+
+  // Pins konfigurieren
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(npnPin, OUTPUT);
+  pinMode(START_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(TARE_BUTTON_PIN, INPUT_PULLUP);
+  
+  // WLAN verbinden
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nVerbunden mit WLAN. IP-Adresse: ");
+  Serial.println(WiFi.localIP());
+
+//Geschwindigkeit des Motors definieren
+myStepper.setSpeed(10);
+
+
+  // Webserver-Routen
+  server.on("/", handleRoot);
+  server.on("/tare", handleTare);
+  server.on("/start", handleStartStop);
+  server.on("/setweight", handleSetWeight);
+  server.on("/setoffset", handleSetOffset);
+  server.on("/getData", handleGetData);
+  server.on("/setMahlgrad", handleSetMahlgrad);
+
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();  // Webserver-Anfragen verarbeiten
+
+  // Potentiometerwert auslesen
+  int analogWert = analogRead(POT_PIN);
+  float potGewicht = (analogWert / 1023.0) * 12.5;
+
+  // Prüfen, ob der Poti bewegt wurde
+  if (fabs(potGewicht - lastPotValue) > 1) {  
+    manualMode = false;  // Falls Poti bewegt wird, Web-Eingabe überschreiben
+    zielGewicht = potGewicht;
+  }
+
+  lastPotValue = potGewicht;  // Poti-Wert speichern
+
+  // Gewicht messen
+  aktuellesGewicht = scale.get_units();
+
+  // Taster für Start/Stop prüfen
+  if (digitalRead(START_BUTTON_PIN) == LOW) {
+    mahlungAktiv = !mahlungAktiv;
+    delay(500);
+  }
+
+  // Taster für Tarieren prüfen
+  if (digitalRead(TARE_BUTTON_PIN) == LOW) {
+    scale.tare();
+    delay(500);
+  }
+
+  // Mahlung steuern
+  if (mahlungAktiv) {
+    if (aktuellesGewicht < (zielGewicht - offset)) {
+      digitalWrite(LED_PIN, HIGH);
+      digitalWrite(npnPin, HIGH);
+    } else {
+      digitalWrite(LED_PIN, LOW);
+      digitalWrite(npnPin, LOW);
+      mahlungAktiv = false;
+    }
+  } else {
+    digitalWrite(LED_PIN, LOW);
+    digitalWrite(npnPin, LOW);
+  }
+
+  delay(100);
+}
+
+// HTML-Seite generieren mit Live-Update
+void handleRoot() {
+  String html = "<html><head>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<style>";
+  html += "body { font-family: Arial, sans-serif;color: #f4f4f4 ; text-align: center; background: #f4f4f4; }";
+  html += "h1 { color: #00BFFF; }";
+  html += ".container { max-width: 400px; margin: auto; padding: 20px; background:black; border-radius: 10px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); }";
+  html += "button { font-size: 18px; padding: 10px; margin: 10px; width: 100px; border: none; cursor: pointer; }";
+  html += ".btn { background: #28a745; color: white; height: 100; border-radius: 50px; }";
+  html += ".btn-stop { background: #dc3545; height: 100; border-radius: 50px;}";
+  html += ".btn-secondary { background: #00BFFF; border-radius: 5px; }";
+  html += ".weight-box { font-size: 24px; font-weight: bold; margin: 10px 0; }";
+  html += "select { font-size: 18px; padding: 5px; margin: 10px; }";
+  html += "</style>";
+  html += "<script>";
+  html += "function updateData() { fetch('/getData').then(response => response.json()).then(data => {";
+  html += "document.getElementById('currentWeight').innerText = data.aktuellesGewicht + ' g';";
+  html += "document.getElementById('targetWeight').innerText = data.zielGewicht + ' g';";
+  html += "document.getElementById('offset').innerText = data.offset + ' g';";
+  html += "document.getElementById('mahlungStatus').innerText = data.mahlungAktiv ? 'Aktiv' : 'Inaktiv';";
+  html += "}); }";
+  html += "setInterval(updateData, 100);";
+  html += "function changeWeight(change) { fetch('/setweight?weight=' + (parseFloat(document.getElementById('targetWeight').innerText) + change)); }";
+  html += "function changeOffset(change) { fetch('/setoffset?offset=' + (parseFloat(document.getElementById('offset').innerText) + change)); }";
+  html += "function setMahlgrad() { const grad = document.getElementById('mahlgrad').value; fetch('/setMahlgrad?grad=' + grad); }";
+  html += "</script></head><body>";
+
+  html += "<div class='container'>";
+  html += "<h1>EASYGRIND BARATZA SETTE 270</h1>";
+  html += "<p>Aktuelles Gewicht: <span class='weight-box' id='currentWeight'>0.0 g</span></p>";
+
+  // Zielgewicht-Einstellung mit Buttons
+  html += "<p> Zielgewicht: <span class='weight-box' id='targetWeight'>0.0 g</span></p>";
+  html += "<button class='btn-secondary' onclick='changeWeight(-0.1)'>-</button>";
+  html += "<button class='btn-secondary' onclick='changeWeight(0.1)'>+</button>";
+
+  // Offset-Einstellung mit Buttons
+  html += "<p>Offset: <span class='weight-box' id='offset'>0.0 g</span></p>";
+  html += "<button class='btn-secondary' onclick='changeOffset(-0.1)'>-</button>";
+  html += "<button class='btn-secondary' onclick='changeOffset(0.1)'>+</button>";
+
+  // Status und Buttons
+  html += "<p>Mahlung: <span id='mahlungStatus'>Inaktiv</span></p>";
+  html += "<a href='/tare'><button class='btn'>Tarieren</button></a>";
+  html += "<a href='/start'><button class='btn btn-stop'>Start/Stopp</button></a>";
+
+  html += "<br><br>";
+
+  html += "<h3>Mahlgradverstellung</h3>";
+  html += "<select id='mahlgrad' onchange='setMahlgrad()'>";
+  html += "<option value='-4'>am feinsten</option>";
+  html += "<option value='-3'>noch feiner</option>";
+  html += "<option value='-2'>ziemlich fein</option>";
+  html += "<option value='-1'>etwas feiner</option>";
+  html += "<option value='0' selected>mittel</option>";
+  html += "<option value='1'>etwas groeber</option>";
+  html += "<option value='2'>ziemlich grob</option>";
+  html += "<option value='3'>noch groeber</option>";
+  html += "<option value='4'>am groebsten</option>";
+  html += "</select>";
+
+  html += "</div></body></html>";
+  server.send(200, "text/html", html);
+}
+
+// API: Live-Werte zurückgeben
+void handleGetData() {
+  String json = "{";
+  json += "\"aktuellesGewicht\": " + String(aktuellesGewicht, 1) + ",";
+  json += "\"zielGewicht\": " + String(zielGewicht, 1) + ",";
+  json += "\"offset\": " + String(offset, 1) + ",";
+  json += "\"mahlungAktiv\": " + String(mahlungAktiv ? "true" : "false");
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// Waage tarieren
+void handleTare() {
+  scale.tare();
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+// Mahlung starten/stoppen
+void handleStartStop() {
+  mahlungAktiv = !mahlungAktiv;
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+// Zielgewicht setzen (Web-Eingabe)
+void handleSetWeight() {
+  if (server.hasArg("weight")) {
+    zielGewicht = server.arg("weight").toFloat();
+    manualMode = true;  // Manuelles Zielgewicht aktivieren
+  }
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+// Offset setzen
+void handleSetOffset() {
+  if (server.hasArg("offset")) {
+    offset = server.arg("offset").toFloat();
+  }
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+// Mahlgrad setzen
+void handleSetMahlgrad() {
+  if (server.hasArg("grad")) {
+    int neuerMahlgrad = server.arg("grad").toInt();
+    int schritte = (neuerMahlgrad - mahlgrad) * schritteProStufe;
+    myStepper.step(schritte);
+    mahlgrad = neuerMahlgrad;
+    Serial.print("Mahlgrad geändert: ");
+    Serial.println(mahlgrad);
+    Serial.print("Anzahl Schritte: ");
+    Serial.println(schritte);
+  }
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}

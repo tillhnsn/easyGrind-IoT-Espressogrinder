@@ -84,7 +84,6 @@ Dadurch ist der Code an nahezu jeder Mühle verwendbar, welche solch einen physi
 
 
 ## ⚠️ Sicherheitshinweise
-- ESP32 sollte gut belüftet sein (erwärmt sich bei Betrieb)
 - Der Schrittmotor und sein Treiber kann schnell überhitzen
 - Isolierung aller offenen Kontakte gegen Kurzschlüsse
 
@@ -93,6 +92,3 @@ Dadurch ist der Code an nahezu jeder Mühle verwendbar, welche solch einen physi
 ##  Lizenz
 Dieses Projekt steht unter der **MIT-Lizenz** und kann frei genutzt, verändert und weitergegeben werden.
 
----
-
-Viel Erfolg beim Aufbau

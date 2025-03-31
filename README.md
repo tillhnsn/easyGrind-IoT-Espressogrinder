@@ -14,7 +14,7 @@ Dadurch ist der Code an nahezu jeder Mühle verwendbar, welche solch einen physi
 
 ##  Benötigte Komponenten
 ### **Elektronische Bauteile**
-- 1x **ESP32** Mikrocontroller
+- 1x **Arduino Nano / ESP32** Mikrocontroller
 - 1x **HX711** Load Cell Amplifier
 - 1x **Wägezelle** (bis 750g Kapazität)
 - 1x **Schrittmotor (z.B. 28BYJ-48)**
